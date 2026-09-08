@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>信号缺失检测助手 - 设置</title>
+<style>
+	* { margin: 0; padding: 0; box-sizing: border-box; }
+	html, body { height: 100%; }
+	body {
+		font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+		font-size: 13px;
+		color: #d4d4d4;
+		background: #1e1e1e;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+	.header {
+		padding: 10px 14px;
+		border-bottom: 1px solid #333;
+		background: #252526;
+		font-size: 14px;
+		font-weight: 600;
+		color: #fff;
+		flex-shrink: 0;
+	}
+	.body { flex: 1; overflow: auto; padding: 12px 14px; }
+	.section { margin-bottom: 16px; }
+	.section .sec-title {
+		color: #9cdcfe;
+		font-weight: 600;
+		font-size: 12px;
+		margin-bottom: 8px;
+		border-bottom: 1px solid #2d2d30;
+		padding-bottom: 4px;
+	}
+	.row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+	.row label { flex-shrink: 0; width: 150px; color: #ccc; }
+	.row input[type="number"] {
+		width: 70px;
+		background: #2d2d30;
+		border: 1px solid #3e3e42;
+		color: #d4d4d4;
+		border-radius: 3px;
+		padding: 3px 6px;
+		outline: none;
+	}
+	.row input[type="color"] {
+		width: 44px;
+		height: 24px;
+		padding: 0;
+		border: 1px solid #3e3e42;
+		border-radius: 3px;
+		background: #2d2d30;
+		cursor: pointer;
+	}
+	.row input[type="text"] {
+		width: 90px;
+		background: #2d2d30;
+		border: 1px solid #3e3e42;
+		color: #d4d4d4;
+		border-radius: 3px;
+		padding: 3px 6px;
+		font-family: Consolas, monospace;
+		outline: none;
+	}
+	.row .hint { color: #777; font-size: 12px; }
+	.row label.chk { display: flex; align-items: center; gap: 6px; width: auto; cursor: pointer; }
+	.row input[type="checkbox"] { accent-color: #0e639c; }
+	.kind-list label.chk { display: flex; margin-bottom: 6px; cursor: pointer; }
+	.footer {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+		padding: 10px 14px;
+		border-top: 1px solid #333;
+		background: #252526;
+		flex-shrink: 0;
+	}
+	.footer button {
+		background: #0e639c;
+		color: #fff;
+		border: none;
+		border-radius: 3px;
+		padding: 6px 16px;
+		cursor: pointer;
+		font-size: 13px;
+	}
+	.footer button:hover { background: #1177bb; }
+	.footer button.secondary { background: #3a3d41; }
+	.footer button.secondary:hover { background: #4a4d51; }
+	.footer .status { color: #89d185; font-size: 12px; margin-left: auto; }
+	.footer .status.err { color: #f48771; }
+</style>
+</head>
+<body>
+	<div class="header">信号缺失检测助手 - 设置</div>
+	<div class="body">
+		<div class="section">
+			<div class="sec-title">高亮样式</div>
+			<div class="row">
+				<label>标记颜色</label>
+				<input type="color" id="colorPick">
+				<input type="text" id="colorText" maxlength="7">
+				<span class="hint">#rrggbb</span>
+			</div>
+			<div class="row">
+				<label>标记线宽</label>
+				<input type="number" id="lineWidth" min="1" max="10" step="1">
+				<span class="hint">1 ~ 10</span>
+			</div>
+		</div>
+		<div class="section">
+			<div class="sec-title">单连接判定规则</div>
+			<div class="row">
+				<label>器件数阈值</label>
+				<input type="number" id="maxPartCount" min="0" max="5" step="1">
+				<span class="hint">器件数 ≤ 阈值判为单连接（0 = 仅报告无器件连接的网络）</span>
+			</div>
+			<div class="row">
+				<label class="chk"><input type="checkbox" id="netFlagAsConnected"> 电源标识符视为有效连接</label>
+			</div>
+			<div class="row">
+				<label class="chk"><input type="checkbox" id="shortSymbolAsWire"> 短接符号视为导线连接</label>
+			</div>
+		</div>
+		<div class="section">
+			<div class="sec-title">检测项开关</div>
+			<div class="kind-list" id="kindList"></div>
+		</div>
+	</div>
+	<div class="footer">
+		<button id="save">保存</button>
+		<button id="reset" class="secondary">恢复默认</button>
+		<button id="close" class="secondary">关闭</button>
+		<span class="status" id="status"></span>
+	</div>
+
+<script>
+const CONFIG_KEY = 'signalAbsenceDetection.config';
+const KIND_LABEL = {
+	single: '有名网络单连接（器件数 ≤ 阈值）',
+	nopin: '有名网络无器件连接（悬空标签/端口）',
+	unnamed: '未命名网络（器件数 ≤ 阈值）',
+	'lone-wire': '悬空导线（无任何连接）',
+	'isolated-pin': '孤立引脚（未连导线）',
+};
+const DEFAULTS = {
+	highlightColor: '#e63228',
+	lineWidth: 3,
+	maxPartCount: 1,
+	netFlagAsConnected: true,
+	shortSymbolAsWire: true,
+	kinds: { single: true, nopin: true, unnamed: true, 'lone-wire': true, 'isolated-pin': true },
+};
+let cfg = JSON.parse(JSON.stringify(DEFAULTS));
+
+const $ = (id) => document.getElementById(id);
+
+function esc(s) {
+	return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function buildKindList() {
+	$('kindList').innerHTML = Object.keys(KIND_LABEL)
+		.map((k) => '<label class="chk"><input type="checkbox" data-kind="' + esc(k) + '"' + (cfg.kinds[k] ? ' checked' : '') + '> ' + esc(KIND_LABEL[k]) + '</label>')
+		.join('');
+	$('kindList').querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+		cb.onchange = () => { cfg.kinds[cb.dataset.kind] = cb.checked; setStatus(''); };
+	});
+}
+
+function formToCfg() {
+	cfg.highlightColor = $('colorText').value.trim().toLowerCase();
+	cfg.lineWidth = parseInt($('lineWidth').value, 10);
+	cfg.maxPartCount = parseInt($('maxPartCount').value, 10);
+	cfg.netFlagAsConnected = $('netFlagAsConnected').checked;
+	cfg.shortSymbolAsWire = $('shortSymbolAsWire').checked;
+}
+
+function cfgToForm() {
+	$('colorPick').value = cfg.highlightColor;
+	$('colorText').value = cfg.highlightColor;
+	$('lineWidth').value = cfg.lineWidth;
+	$('maxPartCount').value = cfg.maxPartCount;
+	$('netFlagAsConnected').checked = cfg.netFlagAsConnected;
+	$('shortSymbolAsWire').checked = cfg.shortSymbolAsWire;
+	buildKindList();
+}
+
+function setStatus(msg, isErr) {
+	const el = $('status');
+	el.textContent = msg;
+	el.className = 'status' + (isErr ? ' err' : '');
+}
+
+function validate() {
+	if (!/^#[0-9a-f]{6}$/.test(cfg.highlightColor)) return '颜色需为 #rrggbb 格式';
+	if (!(cfg.lineWidth >= 1 && cfg.lineWidth <= 10)) return '线宽需在 1 ~ 10 之间';
+	if (!(cfg.maxPartCount >= 0 && cfg.maxPartCount <= 5)) return '器件数阈值需在 0 ~ 5 之间';
+	return null;
+}
+
+function save() {
+	formToCfg();
+	const err = validate();
+	if (err) { setStatus(err, true); return; }
+	try {
+		eda.sys_Storage.setExtensionUserConfig(CONFIG_KEY, JSON.stringify(cfg));
+		setStatus('已保存 ✓（下次检测生效）');
+	} catch (e) {
+		setStatus('保存失败: ' + (e && e.message ? e.message : String(e)), true);
+	}
+}
+
+function load() {
+	try {
+		const raw = eda.sys_Storage.getExtensionUserConfig(CONFIG_KEY);
+		if (raw) {
+			const saved = JSON.parse(raw);
+			if (saved && typeof saved === 'object') {
+				for (const k of ['highlightColor', 'lineWidth', 'maxPartCount', 'netFlagAsConnected', 'shortSymbolAsWire']) {
+					if (saved[k] !== undefined) cfg[k] = saved[k];
+				}
+				if (saved.kinds) for (const k of Object.keys(DEFAULTS.kinds)) if (saved.kinds[k] !== undefined) cfg.kinds[k] = !!saved.kinds[k];
+			}
+		}
+	} catch (e) {
+		/* 存储损坏用默认 */
+	}
+	cfgToForm();
+}
+
+$('colorPick').oninput = () => { $('colorText').value = $('colorPick').value; };
+$('colorText').onchange = () => { if (/^#[0-9a-fA-F]{6}$/.test($('colorText').value.trim())) $('colorPick').value = $('colorText').value.trim().toLowerCase(); };
+$('save').onclick = save;
+$('reset').onclick = () => { cfg = JSON.parse(JSON.stringify(DEFAULTS)); cfgToForm(); setStatus('已恢复默认（未保存）'); };
+$('close').onclick = async () => { try { await eda.sys_IFrame.closeIFrame('sad-config'); } catch (e) {} };
+load();
+</script>
+</body>
+</html>

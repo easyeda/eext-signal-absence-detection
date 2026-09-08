@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>信号缺失检测报告</title>
+<style>
+	* { margin: 0; padding: 0; box-sizing: border-box; }
+	html, body { height: 100%; }
+	body {
+		font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+		font-size: 13px;
+		color: #d4d4d4;
+		background: #1e1e1e;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+	.header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 10px 14px;
+		border-bottom: 1px solid #333;
+		background: #252526;
+		flex-shrink: 0;
+	}
+	.header .title { font-size: 14px; font-weight: 600; color: #fff; }
+	.header .meta { color: #888; font-size: 12px; margin-top: 2px; }
+	.header button {
+		background: #0e639c;
+		color: #fff;
+		border: none;
+		border-radius: 3px;
+		padding: 5px 12px;
+		cursor: pointer;
+		font-size: 12px;
+	}
+	.header button:hover { background: #1177bb; }
+	.summary {
+		display: flex;
+		gap: 8px;
+		padding: 8px 14px;
+		border-bottom: 1px solid #333;
+		flex-wrap: wrap;
+		flex-shrink: 0;
+	}
+	.chip {
+		background: #2d2d30;
+		border: 1px solid #3e3e42;
+		border-radius: 10px;
+		padding: 2px 10px;
+		font-size: 12px;
+		color: #bbb;
+	}
+	.chip b { color: #e63228; font-weight: 600; }
+	.table-wrap { flex: 1; overflow: auto; }
+	table { width: 100%; border-collapse: collapse; }
+	th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid #2d2d30; white-space: nowrap; }
+	th {
+		position: sticky;
+		top: 0;
+		background: #252526;
+		color: #9cdcfe;
+		font-weight: 600;
+		font-size: 12px;
+		z-index: 1;
+	}
+	tr:hover td { background: #2a2d2e; }
+	td.net { color: #ce9178; font-family: Consolas, monospace; }
+	td.parts { color: #9cdcfe; font-family: Consolas, monospace; }
+	td.kind-neg { color: #e63228; }
+	.locate-btn {
+		background: transparent;
+		border: 1px solid #0e639c;
+		color: #4fc1ff;
+		border-radius: 3px;
+		padding: 2px 10px;
+		cursor: pointer;
+		font-size: 12px;
+	}
+	.locate-btn:hover { background: #0e639c; color: #fff; }
+	.empty {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		height: 100%;
+		color: #777;
+		gap: 8px;
+	}
+	.empty .big { font-size: 30px; }
+	.filter-bar {
+		padding: 6px 14px;
+		border-bottom: 1px solid #333;
+		flex-shrink: 0;
+		display: flex;
+		gap: 8px;
+	}
+	.filter-bar input {
+		flex: 1;
+		background: #2d2d30;
+		border: 1px solid #3e3e42;
+		color: #d4d4d4;
+		border-radius: 3px;
+		padding: 4px 8px;
+		font-size: 12px;
+		outline: none;
+	}
+	.filter-bar input:focus { border-color: #0e639c; }
+</style>
+</head>
+<body>
+	<div class="header">
+		<div>
+			<div class="title">信号缺失检测报告</div>
+			<div class="meta" id="meta">暂无数据</div>
+		</div>
+		<button id="refresh">刷新</button>
+	</div>
+	<div class="summary" id="summary" style="display:none"></div>
+	<div class="filter-bar" id="filterBar" style="display:none">
+		<input id="filterInput" type="text" placeholder="按网络名 / 器件 / 引脚 / 类型筛选...">
+	</div>
+	<div class="table-wrap" id="tableWrap"></div>
+
+<script>
+/* 顶部 const 在 iframe 上下文中需可重复求值，用 window 属性防冲突 */
+const REPORT_KEY = 'signalAbsenceDetection.report';
+const CONFIG_KEY = 'signalAbsenceDetection.config';
+const KIND_LABEL = {
+	single: '单连接（器件数不足或标签无对端）',
+	nopin: '无器件连接（悬空标签/端口）',
+	unnamed: '未命名网络（仅 N 个器件）',
+	'lone-wire': '悬空导线（无任何连接）',
+	'isolated-pin': '孤立引脚（未连导线）',
+};
+let cfg = { highlightColor: '#e63228', lineWidth: 3 };
+let report = null;
+
+/** '#rrggbb' -> {r,g,b,alpha} */
+function toColor(hex) {
+	const m = /^#?([0-9a-fA-F]{6})$/.test(hex || '') ? hex.slice(-6) : 'e63228';
+	return { r: parseInt(m.slice(0, 2), 16), g: parseInt(m.slice(2, 4), 16), b: parseInt(m.slice(4, 6), 16), alpha: 255 };
+}
+
+/** 线段 -> 标记线对象 */
+function segsToMarkers(segs) {
+	return segs.map((s) => ({ type: 'line', startX: s[0], startY: s[1], endX: s[2], endY: s[3] }));
+}
+
+/** 孤立引脚 -> 沿引脚方向的短标记线 */
+function stubToMarker(st) {
+	const dir = { 0: [1, 0], 90: [0, 1], 180: [-1, 0], 270: [0, -1] }[st.rotation] || [1, 0];
+	return { type: 'line', startX: st.x, startY: st.y, endX: st.x + dir[0] * 7, endY: st.y + dir[1] * 7 };
+}
+
+function esc(s) {
+		return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function render() {
+	const meta = document.getElementById('meta');
+	const summaryEl = document.getElementById('summary');
+	const filterBar = document.getElementById('filterBar');
+	const wrap = document.getElementById('tableWrap');
+
+	if (!report || !Array.isArray(report.findings) || report.findings.length === 0) {
+		summaryEl.style.display = 'none';
+		filterBar.style.display = 'none';
+		meta.textContent = report && report.time ? '上次检测：' + new Date(report.time).toLocaleString() + '（无发现）' : '尚未执行检测，请先运行「检测并高亮单连接网络」';
+		wrap.innerHTML = '<div class="empty"><div class="big">✅</div><div>未发现单连接网络</div></div>';
+		return;
+	}
+
+	meta.textContent = '上次检测：' + new Date(report.time).toLocaleString() + '，共 ' + report.findings.length + ' 项';
+	const byKind = {};
+	for (const f of report.findings) byKind[f.kind] = (byKind[f.kind] || 0) + 1;
+	summaryEl.style.display = 'flex';
+	summaryEl.innerHTML = Object.keys(KIND_LABEL)
+		.filter((k) => byKind[k])
+		.map((k) => '<span class="chip">' + KIND_LABEL[k].split('（')[0] + ' <b>' + byKind[k] + '</b></span>')
+		.join('');
+	filterBar.style.display = 'flex';
+	renderTable(document.getElementById('filterInput').value.trim().toLowerCase());
+}
+
+function renderTable(q) {
+	const wrap = document.getElementById('tableWrap');
+	const rows = report.findings
+		.map((f, i) => ({ f, i }))
+		.filter(({ f }) => {
+			if (!q) return true;
+			const hay = [f.net, f.schematic, (f.pageNames || []).join('/'), KIND_LABEL[f.kind] || f.kind, (f.parts || []).join(' '), (f.pins || []).join(' ')].join(' ').toLowerCase();
+			return hay.includes(q);
+		});
+
+	if (rows.length === 0) {
+		wrap.innerHTML = '<div class="empty"><div class="big">🔍</div><div>无匹配项</div></div>';
+		return;
+	}
+
+	let html = '<table><thead><tr><th>#</th><th>原理图</th><th>页面</th><th>网络</th><th>类型</th><th>器件</th><th>引脚</th><th></th></tr></thead><tbody>';
+	for (const { f, i } of rows) {
+		const page = (f.pageNames && f.pageNames[0]) || '';
+		html += '<tr>'
+			+ '<td>' + (i + 1) + '</td>'
+			+ '<td>' + esc(f.schematic) + '</td>'
+			+ '<td>' + esc(page) + '</td>'
+			+ '<td class="net">' + esc(f.net) + '</td>'
+			+ '<td class="kind-neg">' + esc(KIND_LABEL[f.kind] || f.kind) + '</td>'
+			+ '<td class="parts">' + esc((f.parts || []).join(', ') || '-') + '</td>'
+			+ '<td class="parts">' + esc((f.pins || []).join(', ') || '-') + '</td>'
+			+ '<td><button class="locate-btn" data-i="' + i + '">定位</button></td>'
+			+ '</tr>';
+	}
+	html += '</tbody></table>';
+	wrap.innerHTML = html;
+
+	wrap.querySelectorAll('.locate-btn').forEach((btn) => {
+		btn.onclick = () => locate(parseInt(btn.dataset.i, 10));
+	});
+}
+
+/** 定位：跳转到首个涉及图页，重置该页标记（清除上一次定位的橙色），
+    重绘红色基础标记后，以橙色聚焦目标网络并缩放定位画布 */
+async function locate(i) {
+	const f = report.findings[i];
+	if (!f) return;
+	try {
+		const uuid = (f.pageSegs && f.pageSegs[0] && f.pageSegs[0].pageUuid) || (f.pages && f.pages[0]) || (f.pinStubs && f.pinStubs[0] && f.pinStubs[0].pageUuid);
+		if (!uuid) return;
+		const tabId = await eda.dmt_EditorControl.openDocument(uuid);
+		await eda.dmt_EditorControl.removeIndicatorMarkers(tabId);
+
+		/* 重建该页其余发现的红色基础标记 */
+		const base = [];
+		for (const other of report.findings) {
+			if (other === f) continue;
+			for (const ps of other.pageSegs || []) if (ps.pageUuid === uuid) base.push(...segsToMarkers(ps.segs));
+			for (const st of other.pinStubs || []) if (st.pageUuid === uuid) base.push(stubToMarker(st));
+		}
+		if (base.length > 0) await eda.dmt_EditorControl.generateIndicatorMarkers(base, toColor(cfg.highlightColor), cfg.lineWidth, false, tabId);
+
+		/* 目标网络橙色聚焦，zoom=true 让画布定位并缩放到标记处 */
+		const focus = [];
+		for (const ps of f.pageSegs || []) if (ps.pageUuid === uuid) focus.push(...segsToMarkers(ps.segs));
+		for (const st of f.pinStubs || []) if (st.pageUuid === uuid) focus.push(stubToMarker(st));
+		if (focus.length > 0) await eda.dmt_EditorControl.generateIndicatorMarkers(focus, toColor('#ff8c00'), cfg.lineWidth + 1, true, tabId);
+	} catch (e) {
+		/* 页面可能已被删除，静默忽略 */
+	}
+}
+
+async function load() {
+	try {
+		const raw = eda.sys_Storage.getExtensionUserConfig(REPORT_KEY);
+		report = raw ? JSON.parse(raw) : null;
+	} catch (e) {
+		report = null;
+	}
+	try {
+		const rawCfg = eda.sys_Storage.getExtensionUserConfig(CONFIG_KEY);
+		if (rawCfg) cfg = Object.assign(cfg, JSON.parse(rawCfg));
+	} catch (e) {
+		/* 配置读取失败用默认 */
+	}
+	render();
+}
+
+document.getElementById('refresh').onclick = load;
+document.getElementById('filterInput').oninput = (ev) => renderTable(ev.target.value.trim().toLowerCase());
+load();
+</script>
+</body>
+</html>

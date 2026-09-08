@@ -1,0 +1,62 @@
+{
+	"name": "signal-absence-detection",
+	"uuid": "a7f3d2c8e94b4f10b8a6c5d2e1f0a9b4",
+	"displayName": "信号缺失检测助手",
+	"description": "扫描工程内全部原理图，识别单连接/悬空网络（有名网络器件数不足、悬空标签（单一网络名仅覆盖 1 个连通组，无对端）、无器件悬空标签/端口、未命名孤立导线、孤立引脚），沿导线描线高亮并生成检测报告，供设计评审参考。网络按单张原理图作用域判定，同名网络跨图页自动合并，电源网络标识符与短接符号（Short-Symbol）视为有效连接。高亮颜色/线宽与单连接判定规则（器件数阈值、标识符/短接符号处理、检测项开关）均可在设置面板自定义。",
+	"version": "1.2.1",
+	"publisher": "chenlong11",
+	"engines": {
+		"eda": "^3.2.0"
+	},
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "extension-store",
+		"url": "https://ext.lceda.cn/item/chenlong11/signal-absence-detection"
+	},
+	"categories": "Schematic",
+	"keywords": [
+		"Net",
+		"Single",
+		"Highlight",
+		"Review",
+		"单连接",
+		"悬空网络",
+		"高亮"
+	],
+	"images": {
+		"logo": "./images/logo.png"
+	},
+	"activationEvents": {},
+	"entry": "./dist/index",
+	"dependentExtensions": {},
+	"headerMenus": {
+		"sch": [
+			{
+				"id": "sad-main-menu",
+				"title": "🔌 信号缺失检测",
+				"menuItems": [
+					{
+						"id": "sad-detect",
+						"title": "检测并高亮单连接网络",
+						"registerFn": "detectAndHighlight"
+					},
+					{
+						"id": "sad-clear",
+						"title": "清除高亮",
+						"registerFn": "clearHighlight"
+					},
+					{
+						"id": "sad-report",
+						"title": "查看检测报告...",
+						"registerFn": "openReport"
+					},
+					{
+						"id": "sad-config",
+						"title": "设置...",
+						"registerFn": "openConfig"
+					}
+				]
+			}
+		]
+	}
+}
