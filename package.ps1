@@ -6,6 +6,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# 控制台输出统一为 UTF-8，避免中文输出在 Git Bash 等终端显示为乱码
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 if (-not $Version) {
 	$manifest = Get-Content -Raw -Encoding UTF8 (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "extension.json") | ConvertFrom-Json

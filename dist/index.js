@@ -9,8 +9,10 @@
  *
  * 判定规则：网络按「同一张原理图（跨图页）」为作用域，导线先按几何连通性
  * 分组（端点重合 / 端点落线段；十字交叉不合并），再按网络名跨图页合并；
- * 网络标识符（VCC/GND 等电源符号）视为有效连接；同名网络标签 / 端口
- * 出现多次即合并为同一网络（多图页连接的正确表达）。
+ * 电源标识符（VCC/GND 等）视为有效连接，但其名字悬空（仅覆盖 1 个连通组）
+ * 时不豁免 —— 误输入的电源名（如 MCU_3V3123）不会屏蔽自身；同名网络
+ * 标签 / 端口出现多次即合并为同一网络（多图页连接的正确表达）。
+ * 检测范围 = 当前活动图页所属板子的全部原理图页，其余板子不检测。
  * 短接符号（Short-Symbol，short_symbol）两引脚间视为导线直连：桥接的
  * 连通组跨岛合并、网络名互通，且不计入器件数（连接性等价于导线）。
  * 网络标签 / 端口代替导线直连：其网络名并入所在连通组的网络名集合，
@@ -101,7 +103,7 @@ function loadConfig() {
 
 /** 发现类型 -> 中文说明 */
 const KIND_LABEL = {
-	single: '单连接（器件数不足或标签无对端）',
+	single: '单连接（器件数不足或名字无对端）',
 	nopin: '无器件连接（悬空标签/端口）',
 	unnamed: '未命名网络（仅 1 个器件）',
 	'lone-wire': '悬空导线（无任何连接）',
@@ -335,7 +337,8 @@ async function analyzePage(cfg) {
 }
 
 /**
- * 全工程检测：逐原理图（作用域=单张原理图，跨图页按网络名合并）。
+ * 板级检测：范围 = 当前活动图页所属板子的原理图全部图页（作用域=单张
+ * 原理图，跨图页按网络名合并）；其余板子不检测。
  * @returns {{findings: Array, pageUuids: Array<string>}}
  */
 async function detectAll(cfg) {
@@ -350,11 +353,18 @@ async function detectAll(cfg) {
 	}
 
 	const origDoc = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+	/* 检测范围 = 当前活动图页所属板子：即其原理图下的全部图页（跨图页合并
+	   判定不变）；其余板子（其他原理图）不检测。独立原理图（不挂板子）
+	   以该原理图自身为范围。 */
+	const scopeSid = origDoc && origDoc.uuid ? (pagesAll.find((pg) => pg.uuid === origDoc.uuid) || {}).parentSchematicUuid : null;
+	if (!scopeSid || !bySchematic.has(scopeSid)) throw new Error('无法确定当前图页所属的板子（原理图），请确认已打开工程内的原理图页面');
+	const scopedBySchematic = new Map([[scopeSid, bySchematic.get(scopeSid)]]);
+
 	const findings = [];
 	const pageUuids = [];
 
 	try {
-		for (const [sid, pages] of bySchematic) {
+		for (const [sid, pages] of scopedBySchematic) {
 			const pageNames = new Map(pages.map((pg) => [pg.uuid, pg.name]));
 			const namedGroups = [];
 
@@ -445,17 +455,19 @@ async function detectAll(cfg) {
 				m.pagePinPts.set(pg.uuid, (m.pagePinPts.get(pg.uuid) || []).concat(g.pinPts));
 			}
 
-			/* 有名网络判定（两种情形均判为单连接，均要求（可选）无网络标识符）：
-			   1) 器件数 <= 阈值；
-			   2) 悬空标签：单一网络名仅覆盖 1 个连通组 —— 标签本应代替导线把
-			      本组与别处同名组相连，实际无对端；此时即使组内器件已通过导线
-			      直连（如 R13-U8 直连 + EN2.8V 标签），标签也没有建立任何连接。
+			/* 有名网络判定（两种情形均判为单连接）：
+			   1) 器件数 <= 阈值，且（可选）无电源标识符；
+			   2) 悬空名字：单一网络名仅覆盖 1 个连通组 —— 名字（标签/电源标识符）
+			      本应代替导线把本组与别处同名组相连，实际无对端；此时即使组内
+			      器件已通过导线直连（如 R13-U8 直连 + EN2.8V 标签），名字也没有
+			      建立任何连接。此情形不受电源标识符豁免 —— 否则误输入的电源名
+			      （如 MCU_3V3123 仅挂 1 个连通组）会屏蔽自身导致漏报。
 			      （阈值设为 0 = 仅报告无器件连接时，本情形不生效） */
 			for (const m of merged.values()) {
 				const kind = m.parts.size > 0 ? 'single' : 'nopin';
 				const danglingLabel = m.names.length === 1 && m.islands <= 1 && m.parts.size > 0 && cfg.maxPartCount >= 1;
 				const reason = m.parts.size <= cfg.maxPartCount ? 'parts<=threshold' : 'dangling-label';
-				if ((m.parts.size <= cfg.maxPartCount || danglingLabel) && (!cfg.netFlagAsConnected || m.flags === 0) && cfg.kinds[kind]) {
+				if ((m.parts.size <= cfg.maxPartCount || danglingLabel) && (!cfg.netFlagAsConnected || m.flags === 0 || danglingLabel) && cfg.kinds[kind]) {
 					/* 无线段图页（标签直贴引脚等）以引脚短标记呈现 */
 					const pinStubs = [];
 					for (const [u, segs] of m.pageSegs) {
@@ -538,17 +550,17 @@ async function ensureSchematicActive() {
 async function detectAndHighlight() {
 	try {
 		if (!(await ensureSchematicActive())) return;
-		eda.sys_Message.showToastMessage('正在扫描工程内全部原理图...', 'info');
+		eda.sys_Message.showToastMessage('正在检测当前板子的全部原理图页...', 'info');
 
 		const origDoc = await eda.dmt_SelectControl.getCurrentDocumentInfo();
 		const cfg = loadConfig();
 		const { findings, pageUuids } = await detectAll(cfg);
 
-		/* 清除全部图页的旧标记（removeIndicatorMarkers 不传 tabId 仅作用于
-		   最后输入焦点的画布，须逐页显式指定） */
-		const pagesAll = (await eda.dmt_Schematic.getAllSchematicPagesInfo()) || [];
-		for (const pg of pagesAll) {
-			const tabId = await eda.dmt_EditorControl.openDocument(pg.uuid);
+		/* 仅清除检测范围内（当前板子）图页的旧标记（removeIndicatorMarkers
+		   不传 tabId 仅作用于最后输入焦点的画布，须逐页显式指定）；其余板子
+		   不触碰，历史版本的全工程残留标记可经菜单「清除高亮」移除 */
+		for (const pgUuid of pageUuids) {
+			const tabId = await eda.dmt_EditorControl.openDocument(pgUuid);
 			await eda.dmt_EditorControl.removeIndicatorMarkers(tabId);
 		}
 

@@ -118,7 +118,7 @@
 				<span class="hint">器件数 ≤ 阈值判为单连接（0 = 仅报告无器件连接的网络）</span>
 			</div>
 			<div class="row">
-				<label class="chk"><input type="checkbox" id="netFlagAsConnected"> 电源标识符视为有效连接</label>
+				<label class="chk"><input type="checkbox" id="netFlagAsConnected"> 电源标识符视为有效连接（名字悬空时仍报告）</label>
 			</div>
 			<div class="row">
 				<label class="chk"><input type="checkbox" id="shortSymbolAsWire"> 短接符号视为导线连接</label>
@@ -139,7 +139,7 @@
 <script>
 const CONFIG_KEY = 'signalAbsenceDetection.config';
 const KIND_LABEL = {
-	single: '有名网络单连接（器件数 ≤ 阈值）',
+	single: '有名网络单连接（器件数 ≤ 阈值或名字无对端）',
 	nopin: '有名网络无器件连接（悬空标签/端口）',
 	unnamed: '未命名网络（器件数 ≤ 阈值）',
 	'lone-wire': '悬空导线（无任何连接）',
