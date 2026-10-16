@@ -4,14 +4,14 @@
 	"displayName": "信号缺失检测助手",
 	"description": "检测当前图页所属板子的全部原理图页，识别单连接/悬空网络（有名网络器件数不足、悬空标签（单一网络名仅覆盖 1 个连通组，无对端）、无器件悬空标签/端口、未命名孤立导线、孤立引脚），沿导线描线高亮并生成检测报告，供设计评审参考。网络按单张原理图作用域判定（检测范围 = 当前图页所属板子，其余板子不检测），同名网络跨图页自动合并，短接符号（Short-Symbol）视为有效连接，电源标识符名字悬空（仅覆盖 1 个连通组）时仍判单连接。高亮颜色/线宽与单连接判定规则（器件数阈值、标识符/短接符号处理、检测项开关）均可在设置面板自定义。",
 	"version": "1.2.3",
-	"publisher": "chenlong11",
+	"publisher": "EasyEDA",
 	"engines": {
 		"eda": "^3.2.0"
 	},
 	"license": "Apache-2.0",
 	"repository": {
 		"type": "extension-store",
-		"url": "https://ext.lceda.cn/item/chenlong11/signal-absence-detection"
+		"url": "https://github.com/easyeda/eext-signal-absence-detection"
 	},
 	"categories": "Schematic",
 	"keywords": [
